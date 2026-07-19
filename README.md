@@ -42,25 +42,29 @@ export — BIMCamel fills that gap without the slowness and setup friction of th
 
 ## Install
 
-Download **BIMCamel_Setup.exe** from the **[Releases](../../releases/latest)** page and run it.
-One installer does everything:
+Download **BIMCamelSetup.exe** from the **[Releases](../../releases/latest)** page and run it —
+the same graphical installer as the sibling [Dyncamelo](https://github.com/mrshoma99-rgb/dyncamelo)
+plug-in, so every BIMCamel tool installs the same way:
 
-- Installs **just for you** — no admin rights, no UAC prompt. The plug-in goes into your own
+- Installs **just for you** — no admin rights, no UAC prompt. The bundle goes into your own
   `%AppData%\Autodesk\ApplicationPlugins` folder (the location Navisworks reliably auto-loads for
-  your account), so it works without needing a machine administrator.
-- A **Navisworks check** page shows which versions (2024/2025/2026/2027, Manage / Simulate) it found and
-  pre-selects them, so the plug-in is registered for exactly what you have installed.
-- If a previous BIMCamel install is detected (including a leftover machine-wide "all users" install
-  from older builds, or a manual folder copy), it's **upgraded / removed automatically** — elevating
-  once only if a system-wide copy has to be deleted.
-- If the Autodesk `ApplicationPlugins` folder isn't where it should be, the directory page lets
-  you **browse to a custom location**.
-- After installing, Setup **verifies** the files landed and match a detected Navisworks; if not, it
-  says so and drops a shareable log on your Desktop. Uninstall via Apps & Features removes the whole
-  bundle (no stale files left for Navisworks to half-load).
+  your account), with all four year folders (2024–2027); Navisworks picks the matching one.
+- **Detects** which supported Navisworks releases (Manage / Simulate) are present and tells you
+  which build will load; warns when Navisworks is running so you know to restart it.
+- A previous install — including one made by the old Inno Setup `BIMCamel_Setup.exe` — is
+  **upgraded / removed automatically**, and a per-user **Apps & Features** entry is registered
+  for uninstall. Silent modes for scripted deployment: `BIMCamelSetup.exe /silent` and
+  `BIMCamelSetup.exe /uninstall /silent`.
+- Files it writes carry no Mark-of-the-Web, so the `PLUGIN_LOAD_02` / `0x80131515` blocked-DLL
+  failure cannot happen with this install path.
 
 Restart Navisworks — a **BIMCamel** ribbon tab appears with **IFC exporter** and **About** buttons.
-(The installer is unsigned, so Windows SmartScreen may warn on first run.)
+If **Dyncamelo** is installed too, its buttons appear on the **same BIMCamel tab** — the tools
+share one ribbon tab rather than each adding their own. (The installer is unsigned, so Windows
+SmartScreen may warn on first run.)
+
+When a newer release is published, the exporter panel offers it on open (checked at most once a
+day, silently skipped when offline).
 
 **Manual install (no tooling):** copy a built `BIMCamel.bundle` folder into
 `%AppData%\Autodesk\ApplicationPlugins\` — Navisworks loads it on next launch. A ready-to-copy
@@ -93,15 +97,13 @@ your per-user `BIMCamel.bundle` for quick iteration. Note a DLL only loads in th
 it was built against — building against 2024 and running 2025 gives `PLUGIN_LOAD_07: invalid
 referenced Navisworks Api version` — so set `NavisworksYear` to the version you run.
 
-To produce the installer (needs free [Inno Setup 6 or 7](https://jrsoftware.org/isdl.php)):
-
-```powershell
-installer\build_installers.ps1
-```
-
-The script builds the plugin in Release **once per Navisworks version (2024 / 2025 / 2026 / 2027)**, each
-against its own API restored from NuGet, generates the wizard images / icon from the camel logo, and
-compiles `installer\output\BIMCamel_Setup.exe`.
+Releases build themselves: commit the new tag (e.g. `v0.6.0`) to
+[`dist/RELEASE_VERSION`](dist/RELEASE_VERSION) and push — the **release workflow**
+(`.github/workflows/release.yml`, mirrored from Dyncamelo) builds one DLL per Navisworks year on CI,
+stages the bundle, compiles `BIMCamelSetup.exe` with the bundle embedded, and publishes the GitHub
+release with stable-named assets. No local Windows build machine or Inno Setup needed. (It can also
+be run manually from Actions → release with a version input; a version that already has a release
+is skipped.)
 
 The Navisworks API is referenced **for compile only** (`ExcludeAssets=runtime`), so no Autodesk DLLs
 are redistributed — the user's own licensed Navisworks supplies them at run time. To build against a
@@ -112,10 +114,21 @@ local Navisworks install instead (Autodesk's genuine assemblies), pass
 
 ```
 BIMCamel/            plug-in source (UI / Collect / Geometry / Data / Ifc / Profiles)
-installer/           Inno Setup script + build helper for BIMCamel_Setup.exe
+installer/           BIMCamel.Installer — WPF setup app (BIMCamelSetup.exe), shared UI with Dyncamelo
+.github/workflows/   build CI + release workflow (per-year build → bundle → installer → GitHub release)
 *.md                 design + implementation notes
 LICENSE              MIT
 ```
+
+## Part of the BIMCamel toolset
+
+- **[Dyncamelo](https://github.com/mrshoma99-rgb/dyncamelo)** — Dynamo-style **visual programming
+  for Navisworks** (280+ nodes: search, selection sets, color-coding, QTO, clash triage, BCF,
+  viewpoints…). Website: [bimcamel.com/plugins/dyncamelo](https://www.bimcamel.com/plugins/dyncamelo).
+  Both plug-ins share the **BIMCamel** ribbon tab when installed together.
+- **[bimcamel.com](https://bimcamel.com)** — browser-based IFC tools (validate, compare, upgrade /
+  downgrade schema…) and this exporter's page:
+  [bimcamel.com/Export-Navisworks-to-Ifc](https://www.bimcamel.com/Export-Navisworks-to-Ifc).
 
 ## License
 

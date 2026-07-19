@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    BIMCamelSetup — the graphical installer for the Navisworks 2024-2027 bundle.
+    Same installer app (and UI) as the sibling Dyncamelo plug-in, so every
+    BIMCamel tool installs the same way.
+
+    A plain WPF app (black-and-white BIMCamel theme, borderless window) that
+    extracts the application bundle to
+    %APPDATA%\Autodesk\ApplicationPlugins\BIMCamel.bundle, copies itself in
+    for later removal, and registers a per-user Add/Remove Programs entry.
+    Files it writes carry no Mark-of-the-Web, so the PLUGIN_LOAD_02 /
+    0x80131515 blocked-DLL failure cannot happen with this install path.
+
+    PAYLOAD
+    =======
+    The bundle ships as an embedded zip. CI builds it like so:
+
+        dotnet build installer/BIMCamel.Installer -c Release -p:BundlePayload=<abs path to payload.zip>
+
+    where payload.zip contains a single root folder "BIMCamel.bundle/".
+    Without the property (plain builds) the exe still compiles; at run time it
+    falls back to a BIMCamel.bundle folder sitting next to the exe (the layout
+    inside the release zip), and reports an error otherwise.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>BIMCamel.Installer</RootNamespace>
+    <AssemblyName>BIMCamelSetup</AssemblyName>
+    <ApplicationIcon>Resources\bimcamel.ico</ApplicationIcon>
+    <Description>Installer for the BIMCamel IFC Exporter — fast Navisworks to IFC export (2024-2027).</Description>
+    <Company>BIMCamel</Company>
+    <Product>BIMCamel IFC Exporter</Product>
+    <LangVersion>10.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <!-- ZipFileExtensions (CreateEntryFromFile / ExtractToFile) -->
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Resources\logo.png" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(BundlePayload)' != ''">
+    <EmbeddedResource Include="$(BundlePayload)" Link="payload.zip" LogicalName="BIMCamel.Installer.payload.zip" />
+  </ItemGroup>
+
+</Project>

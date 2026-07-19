@@ -62,6 +62,8 @@ namespace BIMCamel.UI
             InitControls();
             InitGridsAndLists();
             Loaded += (_, _) => { UpdateScopeHint(); PreviewBasePoint(); RefreshModelStatus(); };
+            // Non-blocking, once-a-day update check; prompts on the UI thread if a newer release exists.
+            UpdateCheck.Run(action => Dispatcher.BeginInvoke(action));
         }
 
         // Show the real BIMCamel logo. Prefer the embedded resource; fall back to the loose icon next

@@ -1,0 +1,269 @@
+name: release
+
+# Publishes a GitHub Release with the installable Navisworks 2024-2027 bundle.
+# Mirrors the Dyncamelo release workflow so every BIMCamel tool builds and
+# ships the same way. Two ways to run it:
+#
+#   * commit a new tag name (e.g. v0.6.0) to dist/RELEASE_VERSION and push —
+#     the release is created at that commit and the tag is created
+#     server-side by gh, so no tag push or Actions UI access is needed.
+#   * manual dispatch (Actions → release → Run workflow) with the version
+#     input.
+#
+# A version that already has a release is skipped, so ordinary pushes that
+# happen to touch dist/RELEASE_VERSION never fail the workflow.
+#
+# The bundle is BUILT FROM SOURCE on windows-latest (dotnet build -c Release):
+# one BIMCamel.dll per Navisworks year (the per-year API reference assemblies
+# restore from NuGet, so no Navisworks install is needed), the ribbon layout
+# and icons from the project sources, and dist/BIMCamel.bundle supplies the
+# PackageContents.xml template. Committed files under dist/ year folders are
+# never shipped.
+
+on:
+  push:
+    branches: ['**']
+    paths: ['dist/RELEASE_VERSION']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version tag (e.g. v0.6.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      CI: "true"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION.Trim() } else { (Get-Content dist/RELEASE_VERSION -Raw).Trim() }
+          if ($version -notmatch '^v\d+\.\d+\.\d+$') {
+            Write-Host "::error::'$version' is not a valid version tag (expected v<major>.<minor>.<patch>)"
+            exit 1
+          }
+          gh release view $version --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $version already exists — nothing to do."
+            Add-Content -Path $env:GITHUB_ENV -Value "SKIP=true"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "VERSION=$version"
+          exit 0
+
+      - name: Setup .NET SDK 8
+        if: env.SKIP != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build & stage per-year bundle (2024-2027)
+        if: env.SKIP != 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # A Navisworks plug-in must be compiled against the API of the release it
+          # runs in (2024 = Api v21 … 2027 = v24), so BIMCamel.dll builds once PER
+          # YEAR (NavisworksYear selects the Speckle.Navisworks.API version).
+          # Navisworks loads the folder matching its own release via
+          # PackageContents.xml.
+          $years   = '2024', '2025', '2026', '2027'
+          $staging = "staging"
+          $numeric = $env:VERSION.TrimStart('v')
+          foreach ($year in $years) {
+            Write-Host "=== Building for Navisworks $year ==="
+            # --no-incremental: the sources are identical across years, so up-to-date
+            # checks would otherwise skip the recompile against the new API version.
+            dotnet build BIMCamel/BIMCamel.csproj -c Release --no-incremental `
+              -p:NavisworksYear=$year -p:Version=$numeric
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+
+            $dll = "BIMCamel/bin/Release/net48/BIMCamel.dll"
+            if (-not (Test-Path $dll)) { $dll = "BIMCamel/bin/x64/Release/net48/BIMCamel.dll" }
+            if (-not (Test-Path $dll)) {
+              Write-Host "::error::Missing build output for ${year}: BIMCamel.dll"
+              exit 1
+            }
+
+            $yeardir = "$staging/BIMCamel.bundle/$year"
+            New-Item -ItemType Directory -Force -Path "$yeardir/en-US", "$yeardir/Resources" | Out-Null
+            Copy-Item $dll                          -Destination $yeardir
+            Copy-Item "BIMCamel/BIMCamel.xaml"      -Destination "$yeardir/en-US"
+            Copy-Item "BIMCamel/Resources/*.png"    -Destination "$yeardir/Resources"
+          }
+
+          # Bundle manifest (multi-year Components) from the dist template, stamped with
+          # the release version via XML DOM (never string-edit this file — a corrupted
+          # <?xml?> declaration makes Navisworks silently ignore the whole bundle).
+          [xml]$doc = Get-Content "dist/BIMCamel.bundle/PackageContents.xml" -Raw
+          $doc.ApplicationPackage.Version = "$numeric.0"
+          $manifestPath = Join-Path (Get-Location) "$staging/BIMCamel.bundle/PackageContents.xml"
+          $doc.Save($manifestPath)
+
+          # Validation gate: the staged manifest MUST parse, carry the version, and every
+          # year folder MUST hold its DLL.
+          [xml]$check = Get-Content $manifestPath -Raw
+          if ($check.ApplicationPackage.Version -ne "$numeric.0") {
+            Write-Host "::error::Staged PackageContents.xml failed validation"
+            exit 1
+          }
+          foreach ($year in $years) {
+            if (-not (Test-Path "$staging/BIMCamel.bundle/$year/BIMCamel.dll")) {
+              Write-Host "::error::Year folder $year missing from staged bundle"
+              exit 1
+            }
+          }
+
+          Copy-Item "dist/README.md" -Destination $staging
+          Copy-Item "LICENSE"        -Destination $staging
+
+      - name: Build graphical installer (BIMCamelSetup.exe)
+        if: env.SKIP != 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The staged bundle becomes the installer's embedded payload.
+          $numeric = $env:VERSION.TrimStart('v')
+          Compress-Archive -Path "staging/BIMCamel.bundle" -DestinationPath "payload.zip"
+          # --no-incremental is load-bearing: MSBuild's incremental check does not treat
+          # the added EmbeddedResource as a change — an incremental build here would
+          # ship a payload-less exe.
+          dotnet build installer/BIMCamel.Installer/BIMCamel.Installer.csproj -c Release `
+            -p:BundlePayload="$(Join-Path (Get-Location) 'payload.zip')" `
+            -p:Version=$numeric `
+            --no-incremental `
+            -o installer-out
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not (Test-Path "installer-out/BIMCamelSetup.exe")) {
+            Write-Host "::error::Installer build produced no BIMCamelSetup.exe"
+            exit 1
+          }
+          # Embedding gate: a resource is stored verbatim, so the exe MUST be larger
+          # than the payload it carries.
+          $payloadSize = (Get-Item "payload.zip").Length
+          $exeSize = (Get-Item "installer-out/BIMCamelSetup.exe").Length
+          if ($exeSize -le $payloadSize) {
+            Write-Host "::error::BIMCamelSetup.exe ($exeSize bytes) is smaller than its payload ($payloadSize bytes) - the bundle was not embedded"
+            exit 1
+          }
+          Copy-Item "installer-out/BIMCamelSetup.exe" "BIMCamelSetup.exe"
+          # The zip distribution gets the setup exe too: it installs the sibling
+          # BIMCamel.bundle folder when run without a payload.
+          Copy-Item "installer-out/BIMCamelSetup.exe" "staging/BIMCamelSetup.exe"
+
+      - name: Package bundle zip
+        if: env.SKIP != 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = "BIMCamel-ifc-exporter-$env:VERSION-navisworks.zip"
+          Compress-Archive -Path "staging/*" -DestinationPath $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "$zip.sha256" -Value "$hash  $zip" -NoNewline
+          # Stable-named checksum to pair with the stable-named zip, so
+          # releases/latest/download/BIMCamel-ifc-exporter-navisworks.zip.sha256 always resolves.
+          Set-Content -Path "BIMCamel-ifc-exporter-navisworks.zip.sha256" -Value "$hash  BIMCamel-ifc-exporter-navisworks.zip" -NoNewline
+          $setupHash = (Get-FileHash "BIMCamelSetup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "BIMCamelSetup.exe.sha256" -Value "$setupHash  BIMCamelSetup.exe" -NoNewline
+          Add-Content -Path $env:GITHUB_ENV -Value "ZIP=$zip"
+
+      - name: Create GitHub release
+        if: env.SKIP != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $checksum = Get-Content "$env:ZIP.sha256" -Raw
+          $setupChecksum = Get-Content "BIMCamelSetup.exe.sha256" -Raw
+          $notes = @"
+          BIMCamel IFC Exporter for Autodesk Navisworks 2024-2027 — fast Navisworks → IFC export (IFC4 / IFC2x3).
+
+          ## Install (recommended)
+
+          1. Download ``BIMCamelSetup.exe`` and run it — a graphical installer puts the bundle in ``%APPDATA%\Autodesk\ApplicationPlugins`` (per-user, no admin rights) and registers an Add/Remove Programs entry.
+          2. If Windows SmartScreen appears (unsigned download), click **More info → Run anyway**.
+          3. Start Navisworks Manage/Simulate 2024-2027 — the **BIMCamel** ribbon tab appears with the IFC exporter button. If Dyncamelo is installed too, both tools share the one BIMCamel tab.
+
+          Uninstall from Windows **Settings → Apps → BIMCamel IFC Exporter for Navisworks**, or rerun the setup. Silent modes: ``BIMCamelSetup.exe /silent`` and ``BIMCamelSetup.exe /uninstall /silent``.
+
+          ## Install (zip, scripted deployments)
+
+          Download and extract ``$env:ZIP``, then run ``BIMCamelSetup.exe`` from the extracted folder.
+
+          **Troubleshooting** — if Navisworks reports ``PLUGIN_LOAD_02`` / ``0x80131515`` after a *manual* copy of the extracted bundle, Windows kept the browser's "downloaded file" mark on the DLLs; the setup exe strips it automatically. Manual fix: ``Get-ChildItem "`$env:APPDATA\Autodesk\ApplicationPlugins\BIMCamel.bundle" -Recurse -File | Unblock-File`` in PowerShell.
+
+          Also from BIMCamel: [Dyncamelo](https://github.com/mrshoma99-rgb/dyncamelo) — Dynamo-style visual programming for Navisworks.
+
+          ## Checksums
+
+          ``````
+          $checksum
+          $setupChecksum
+          ``````
+          "@
+          Set-Content -Path notes.md -Value $notes
+          # Stable-named copy so releases/latest/download/<name> URLs never change.
+          Copy-Item $env:ZIP "BIMCamel-ifc-exporter-navisworks.zip"
+          gh release create $env:VERSION $env:ZIP "$env:ZIP.sha256" `
+            "BIMCamel-ifc-exporter-navisworks.zip" "BIMCamel-ifc-exporter-navisworks.zip.sha256" `
+            "BIMCamelSetup.exe" "BIMCamelSetup.exe.sha256" `
+            --target $env:GITHUB_SHA `
+            --title "BIMCamel IFC Exporter $env:VERSION (Navisworks 2024-2027)" `
+            --notes-file notes.md
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      # Always expose the latest release assets as a workflow artifact (even when
+      # the release already existed and packaging was skipped) so tooling can
+      # relay them without extra tokens.
+      - name: Expose latest release assets as artifact
+        if: always() && env.VERSION != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Force -Path relay | Out-Null
+          gh release download $env:VERSION --repo $env:GITHUB_REPOSITORY --dir relay --pattern "*.zip" --pattern "*.sha256" --pattern "*.exe"
+          if ($LASTEXITCODE -ne 0) { Write-Host "No release to relay" }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always() && env.VERSION != ''
+        continue-on-error: true
+        with:
+          name: release-zip
+          path: relay/
+          retention-days: 7
+
+      # Optional: refreshes the bimcamel.com download metadata when a fine-grained
+      # PAT with contents:write on mrshoma99-rgb/bimcamel is stored as the
+      # SITE_REPO_TOKEN secret; without the secret it skips. The site's download
+      # buttons link to releases/latest/download/... on this repo, so this step
+      # only maintains the version metadata shown on the page.
+      - name: Update website download metadata (bimcamel repo)
+        if: always() && env.VERSION != ''
+        env:
+          SITETOKEN: ${{ secrets.SITE_REPO_TOKEN }}
+        run: |
+          if (-not $env:SITETOKEN) { Write-Host "SITE_REPO_TOKEN not set - skipping site metadata update"; exit 0 }
+          if (-not (Test-Path "relay/BIMCamelSetup.exe")) { Write-Host "::error::relay assets missing"; exit 1 }
+          git clone --depth 1 "https://x-access-token:$($env:SITETOKEN)@github.com/mrshoma99-rgb/bimcamel.git" sitework
+          $dl = "sitework/src/bimcamel-web/public/downloads"
+          New-Item -ItemType Directory -Force -Path $dl | Out-Null
+          $setupHash = (Get-FileHash "relay/BIMCamelSetup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -Path "$dl/bimcamel-ifc-latest.json" -Value ('{"version":"' + $env:VERSION + '","setup":"BIMCamelSetup.exe","setupSha256":"' + $setupHash + '"}') -NoNewline
+          Push-Location sitework
+          git config user.name "bimcamel-ifc-release-bot"
+          git config user.email "noreply@bimcamel.com"
+          git add src/bimcamel-web/public/downloads
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { Write-Host "Site metadata already current"; exit 0 }
+          git commit -m "chore: BIMCamel IFC Exporter $env:VERSION download metadata"
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Pop-Location
