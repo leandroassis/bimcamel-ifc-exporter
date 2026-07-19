@@ -32,6 +32,7 @@ namespace BIMCamel
         public override int ExecuteCommand(string commandId, params string[] parameters)
         {
             AssemblyResolver.Ensure();
+            RibbonTabMerger.Install(); // idempotent fallback if the startup plugin didn't load
 
             try
             {
