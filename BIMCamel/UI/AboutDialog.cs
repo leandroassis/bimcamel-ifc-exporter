@@ -161,6 +161,9 @@ namespace BIMCamel.UI
             };
             border.MouseEnter += (_, _) => border.Background = Fill("#E2E2E2");
             border.MouseLeave += (_, _) => border.Background = Paper;
+            // Handle the DOWN too: unhandled, it bubbles to the window whose DragMove() captures
+            // the mouse and swallows the UP — the click would never fire.
+            border.MouseLeftButtonDown += (_, e) => e.Handled = true;
             border.MouseLeftButtonUp += (_, e) => { e.Handled = true; onClick(); };
             return border;
         }
@@ -186,6 +189,9 @@ namespace BIMCamel.UI
             };
             border.MouseEnter += (_, _) => border.Background = Fill("#1AFFFFFF");
             border.MouseLeave += (_, _) => border.Background = Brushes.Transparent;
+            // Handle the DOWN too: unhandled, it bubbles to the window whose DragMove() captures
+            // the mouse and swallows the UP — the click would never fire.
+            border.MouseLeftButtonDown += (_, e) => e.Handled = true;
             border.MouseLeftButtonUp += (_, e) => { e.Handled = true; window.Close(); };
             return border;
         }
