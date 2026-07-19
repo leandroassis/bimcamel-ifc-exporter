@@ -212,9 +212,12 @@ jobs:
           Set-Content -Path notes.md -Value $notes
           # Stable-named copy so releases/latest/download/<name> URLs never change.
           Copy-Item $env:ZIP "BIMCamel-ifc-exporter-navisworks.zip"
+          # Legacy alias: pre-0.6 links (site, blogs, social) point at
+          # releases/latest/download/BIMCamel_Setup.exe — keep that name resolving.
+          Copy-Item "BIMCamelSetup.exe" "BIMCamel_Setup.exe"
           gh release create $env:VERSION $env:ZIP "$env:ZIP.sha256" `
             "BIMCamel-ifc-exporter-navisworks.zip" "BIMCamel-ifc-exporter-navisworks.zip.sha256" `
-            "BIMCamelSetup.exe" "BIMCamelSetup.exe.sha256" `
+            "BIMCamelSetup.exe" "BIMCamelSetup.exe.sha256" "BIMCamel_Setup.exe" `
             --target $env:GITHUB_SHA `
             --title "BIMCamel IFC Exporter $env:VERSION (Navisworks 2024-2027)" `
             --notes-file notes.md
