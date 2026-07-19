@@ -140,7 +140,7 @@ namespace BIMCamel.Ifc
                 _path = path;
                 W = new StreamingStepWriter(path, coordDecimals);
                 W.WriteHeader(schema, System.IO.Path.GetFileName(path), author);
-                S = WriteSkeletonBase(W, coords, minX, minY, minZ, georef, author, names);
+                S = WriteSkeletonBase(W, schema, coords, minX, minY, minZ, georef, author, names);
                 Storeys = new StoreyTable(W, S, names);
             }
 
@@ -261,7 +261,7 @@ namespace BIMCamel.Ifc
         // ── spatial structure ───────────────────────────────────────────────────
         private struct SkelBase { public int Ctx, Owner, Axis, OriginPt, Building, BuildingPlace; }
 
-        private static SkelBase WriteSkeletonBase(StreamingStepWriter w, CoordOptions coords, double minX, double minY, double minZ, bool georef, string author, SpatialNames names)
+        private static SkelBase WriteSkeletonBase(StreamingStepWriter w, IfcSchema schema, CoordOptions coords, double minX, double minY, double minZ, bool georef, string author, SpatialNames names)
         {
             int len = w.Write("IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.)");
             int area = w.Write("IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.)");
@@ -286,7 +286,10 @@ namespace BIMCamel.Ifc
             int pao = w.Write($"IFCPERSONANDORGANIZATION({Ref(person)},{Ref(org)},$)");
             int app = w.Write($"IFCAPPLICATION({Ref(org)},'0.1','BIMCamel IFC Exporter','BIMCamel')");
             long ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            int owner = w.Write($"IFCOWNERHISTORY({Ref(pao)},{Ref(app)},$,.ADDED.,$,$,$,{ts})");
+            // IFC4's CorrectChangeAction rule forbids .ADDED. without a LastModifiedDate, but
+            // IFC2x3 keeps .ADDED. — its IfcChangeActionEnum has no NOTDEFINED member.
+            string change = schema == IfcSchema.Ifc4 ? ".NOTDEFINED." : ".ADDED.";
+            int owner = w.Write($"IFCOWNERHISTORY({Ref(pao)},{Ref(app)},$,{change},$,$,$,{ts})");
 
             int proj = w.Write($"IFCPROJECT({G()},{Ref(owner)},{Str(names.Project)},$,$,$,$,({Ref(ctx)}),{Ref(units)})");
             int sitePt = w.Write($"IFCCARTESIANPOINT(({R(minX)},{R(minY)},{R(minZ)}))");
@@ -360,18 +363,24 @@ namespace BIMCamel.Ifc
             // Type objects (IFC4 only — 2x3 type signatures diverge).
             if (schema == IfcSchema.Ifc4)
             {
-                var groups = new Dictionary<string, (string cls, string type, List<int> ids)>(StringComparer.Ordinal);
+                var groups = new Dictionary<string, (string cls, string predef, string type, List<int> ids)>(StringComparer.Ordinal);
                 foreach (var o in occ)
                 {
                     if (string.IsNullOrEmpty(o.TypeName)) continue;
-                    string key = (TypeMapping.Friendly(o.ClassKey)) + "" + o.TypeName;
-                    if (!groups.TryGetValue(key, out var g)) { g = (TypeMapping.Friendly(o.ClassKey), o.TypeName, new List<int>()); groups[key] = g; }
+                    string key = (o.ClassKey ?? "") + "" + o.TypeName;
+                    if (!groups.TryGetValue(key, out var g)) { g = (TypeMapping.Friendly(o.ClassKey), TypeMapping.Predef(o.ClassKey), o.TypeName, new List<int>()); groups[key] = g; }
                     g.ids.Add(o.Id);
                 }
                 foreach (var g in groups.Values)
                 {
                     string ent = TypeMapping.TypeEntityFor(g.cls);
-                    int typeId = w.Write($"{ent}({G()},{Ref(owner)},{Str(g.type)},$,$,$,$,$,$,$)");
+                    // PredefinedType is MANDATORY on IFC4 type entities (unlike on the occurrences,
+                    // where it is optional) — '$' makes the file schema-invalid and Revit refuses it.
+                    string predef = string.IsNullOrEmpty(g.predef) ? ".NOTDEFINED." : "." + g.predef.Trim().ToUpperInvariant() + ".";
+                    int typeId = ent == "IFCFURNITURETYPE"
+                        // IfcFurnitureType diverges: 11 attrs, mandatory AssemblyPlace 10th, optional PredefinedType 11th.
+                        ? w.Write($"{ent}({G()},{Ref(owner)},{Str(g.type)},$,$,$,$,$,$,.NOTDEFINED.,{predef})")
+                        : w.Write($"{ent}({G()},{Ref(owner)},{Str(g.type)},$,$,$,$,$,$,{predef})");
                     w.Write($"IFCRELDEFINESBYTYPE({G()},{Ref(owner)},$,$,({Join(g.ids)}),{Ref(typeId)})");
                 }
                 summary.TypeCount += groups.Count;
