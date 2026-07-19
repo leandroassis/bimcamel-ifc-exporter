@@ -85,7 +85,8 @@ namespace BIMCamel.Data
             { "Switching device", new IfcClass("IFCSWITCHINGDEVICE", "IFCFLOWCONTROLLER", 8) },
             { "Protective device", new IfcClass("IFCPROTECTIVEDEVICE", "IFCFLOWCONTROLLER", 8) },
             { "Transformer", new IfcClass("IFCTRANSFORMER", "IFCENERGYCONVERSIONDEVICE", 8) },
-            { "Distribution board", new IfcClass("IFCDISTRIBUTIONBOARD", "IFCFLOWCONTROLLER", 8) },
+            // NB: IfcDistributionBoard only exists from IFC4X3 — in IFC4 the entity is IfcElectricDistributionBoard.
+            { "Distribution board", new IfcClass("IFCELECTRICDISTRIBUTIONBOARD", "IFCFLOWCONTROLLER", 8) },
             { "Electric appliance", new IfcClass("IFCELECTRICAPPLIANCE", "IFCFLOWTERMINAL", 8) },
             { "Electric generator", new IfcClass("IFCELECTRICGENERATOR", "IFCENERGYCONVERSIONDEVICE", 8) },
             { "Electric motor", new IfcClass("IFCELECTRICMOTOR", "IFCENERGYCONVERSIONDEVICE", 8) },

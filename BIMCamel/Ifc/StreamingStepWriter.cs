@@ -220,11 +220,14 @@ namespace BIMCamel.Ifc
         public void WriteHeader(IfcSchema schema, string fileName, string author)
         {
             string schemaId = schema == IfcSchema.Ifc4 ? "IFC4" : "IFC2X3";
+            // CoordinationView is an IFC2x3 MVD; declaring it on IFC4 misleads importers that pick
+            // their code path from this token (IFC4 files carry the ReferenceView definition).
+            string mvd = schema == IfcSchema.Ifc4 ? "ViewDefinition [ReferenceView_V1.2]" : "ViewDefinition [CoordinationView]";
             string ts = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 
             Emit("ISO-10303-21;\n");
             Emit("HEADER;\n");
-            Emit("FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');\n");
+            Emit($"FILE_DESCRIPTION(('{mvd}'),'2;1');\n");
             Emit($"FILE_NAME({Str(fileName)},'{ts}',({Str(author)}),(''),'BIMCamel IFC Exporter','BIMCamel','');\n");
             Emit($"FILE_SCHEMA(('{schemaId}'));\n");
             Emit("ENDSEC;\n");
