@@ -1,0 +1,47 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    name: Windows (plug-in ${{ matrix.year }})
+    runs-on: windows-latest
+    env:
+      CI: "true"
+    strategy:
+      fail-fast: false
+      matrix:
+        year: ["2024", "2025", "2026", "2027"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # A Navisworks plug-in must compile against the API of the release it runs in;
+      # the per-year reference assemblies are restored from NuGet (see BIMCamel.csproj).
+      - name: Build plug-in (Release, Navisworks ${{ matrix.year }})
+        run: dotnet build BIMCamel/BIMCamel.csproj -c Release -p:NavisworksYear=${{ matrix.year }}
+
+  installer:
+    name: Windows (installer)
+    runs-on: windows-latest
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      # Payload-less compile check; the release workflow embeds the real bundle.
+      - name: Build installer (Release)
+        run: dotnet build installer/BIMCamel.Installer/BIMCamel.Installer.csproj -c Release

@@ -13,6 +13,11 @@
     <OutputType>Library</OutputType>
     <Product>BIMCamel IFC Exporter</Product>
 
+    <!-- Assembly version, read at runtime by the update check and About box. Bump in lockstep
+         with dist/RELEASE_VERSION on every release (the release workflow also stamps it
+         explicitly via -p:Version). -->
+    <Version>0.5.0</Version>
+
     <!--
       Per-year build: a plug-in must be compiled against the API of the release it runs in
       (2024 = Api v21, 2025 = v22, 2026 = v23, 2027 = v24); a DLL built against one year loads in

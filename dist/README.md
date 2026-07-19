@@ -23,7 +23,9 @@
    ```
 
    (i.e. `C:\Users\<you>\AppData\Roaming\Autodesk\ApplicationPlugins\BIMCamel.bundle`)
-3. Restart Navisworks — the **BIMCamel** ribbon tab appears.
+3. Restart Navisworks — the **BIMCamel** ribbon tab appears. (The tab is shared with the other
+   BIMCamel tools: if [Dyncamelo](https://github.com/mrshoma99-rgb/dyncamelo) is installed too, its
+   buttons sit on the same tab — both ribbon layouts declare the same `ID_Tab_BIMCamel` tab id.)
 
 ## Why one DLL per year
 

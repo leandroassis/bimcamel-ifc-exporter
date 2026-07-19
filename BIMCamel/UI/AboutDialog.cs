@@ -11,6 +11,7 @@ namespace BIMCamel.UI
     internal static class AboutDialog
     {
         public const string Url = "https://bimcamel.com";
+        public const string DyncameloUrl = "https://www.bimcamel.com/plugins/dyncamelo";
 
         /// <summary>Load a PNG from the plugin's deployed Resources folder (next to the DLL).</summary>
         internal static Image? Icon(string file)
@@ -40,10 +41,12 @@ namespace BIMCamel.UI
             var body = new Label { Text = "Visit bimcamel.com for more free BIM tools, updates and docs:", Location = new Point(20, 96), AutoSize = true, Font = new Font("Segoe UI", 9.5f) };
             var link = new LinkLabel { Text = Url, Location = new Point(20, 124), AutoSize = true, Font = new Font("Segoe UI", 10.5f, FontStyle.Bold) };
             link.LinkClicked += (_, _) => Open();
+            var dync = new LinkLabel { Text = "Also from BIMCamel: Dyncamelo — visual programming for Navisworks", Location = new Point(20, 150), AutoSize = true, Font = new Font("Segoe UI", 9f) };
+            dync.LinkClicked += (_, _) => { try { Process.Start(new ProcessStartInfo(DyncameloUrl) { UseShellExecute = true }); } catch { } };
             var visit = new Button { Text = "Visit bimcamel.com", Location = new Point(20, 182), Size = new Size(150, 30), FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(0, 112, 192), ForeColor = Color.White, Cursor = Cursors.Hand };
             visit.Click += (_, _) => Open();
             var ok = new Button { Text = "Close", DialogResult = DialogResult.OK, Location = new Point(330, 182), Size = new Size(80, 30) };
-            f.Controls.AddRange(new Control[] { pic, hdr, sub, body, link, visit, ok });
+            f.Controls.AddRange(new Control[] { pic, hdr, sub, body, link, dync, visit, ok });
             f.AcceptButton = ok;
             f.ShowDialog();
         }
