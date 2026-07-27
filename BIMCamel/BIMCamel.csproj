@@ -16,7 +16,7 @@
     <!-- Assembly version, read at runtime by the update check and About box. Bump in lockstep
          with dist/RELEASE_VERSION on every release (the release workflow also stamps it
          explicitly via -p:Version). -->
-    <Version>0.7.1</Version>
+    <Version>0.7.2</Version>
 
     <!--
       Per-year build: a plug-in must be compiled against the API of the release it runs in
@@ -92,6 +92,8 @@
     <Reference Include="System.Numerics" />
     <!-- DataContractJsonSerializer for export profiles (F10) -->
     <Reference Include="System.Runtime.Serialization" />
+    <!-- JavaScriptSerializer: parses View.GetClippingPlanes() JSON for the section-box scope -->
+    <Reference Include="System.Web.Extensions" />
   </ItemGroup>
 
   <!-- ── XAML ribbon layout is a Navisworks content file, NOT WPF-compiled ───
