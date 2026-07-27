@@ -90,10 +90,12 @@
   <ItemGroup>
     <!-- System.Numerics provides BigInteger, used by IfcGuid -->
     <Reference Include="System.Numerics" />
-    <!-- DataContractJsonSerializer for export profiles (F10) -->
+    <!-- DataContractJsonSerializer for export profiles (F10); JsonReaderWriterFactory for the
+         section-box GetClippingPlanes() JSON (SectionBoxJson). NOTE: do NOT reach for
+         System.Web.Extensions/JavaScriptSerializer here — its transitive System.Web dependency
+         breaks the WPF markup compiler under the modern SDK (MC1000). -->
     <Reference Include="System.Runtime.Serialization" />
-    <!-- JavaScriptSerializer: parses View.GetClippingPlanes() JSON for the section-box scope -->
-    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.Xml.Linq" />
   </ItemGroup>
 
   <!-- ── XAML ribbon layout is a Navisworks content file, NOT WPF-compiled ───
