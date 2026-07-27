@@ -16,7 +16,7 @@
     <!-- Assembly version, read at runtime by the update check and About box. Bump in lockstep
          with dist/RELEASE_VERSION on every release (the release workflow also stamps it
          explicitly via -p:Version). -->
-    <Version>0.7.1</Version>
+    <Version>0.7.2</Version>
 
     <!--
       Per-year build: a plug-in must be compiled against the API of the release it runs in
@@ -90,8 +90,12 @@
   <ItemGroup>
     <!-- System.Numerics provides BigInteger, used by IfcGuid -->
     <Reference Include="System.Numerics" />
-    <!-- DataContractJsonSerializer for export profiles (F10) -->
+    <!-- DataContractJsonSerializer for export profiles (F10); JsonReaderWriterFactory for the
+         section-box GetClippingPlanes() JSON (SectionBoxJson). NOTE: do NOT reach for
+         System.Web.Extensions/JavaScriptSerializer here — its transitive System.Web dependency
+         breaks the WPF markup compiler under the modern SDK (MC1000). -->
     <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.Xml.Linq" />
   </ItemGroup>
 
   <!-- ── XAML ribbon layout is a Navisworks content file, NOT WPF-compiled ───

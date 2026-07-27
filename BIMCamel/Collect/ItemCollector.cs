@@ -52,11 +52,12 @@ namespace BIMCamel.Collect
         {
             if (doc == null) return new List<ModelItem>();
 
-            var box = TryGetSectionBoxBounds();
+            var box = TryGetSectionBoxBounds(doc);
             if (box == null)
                 throw new InvalidOperationException(
-                    "No active section box found. Enable a section box in Navisworks, " +
-                    "or pick a different scope.");
+                    "No active section box found. Enable sectioning in Navisworks " +
+                    "(Viewpoint → Enable Sectioning, Box mode — axis-aligned section planes " +
+                    "work too), or pick a different scope.");
 
             var leaves = new List<ModelItem>();
             int visited = 0;
@@ -188,51 +189,25 @@ namespace BIMCamel.Collect
             }
         }
 
-        // ── Section box (axis-aligned) reconstructed from COM clipping planes ────────
-        private sealed class Box
-        {
-            public double MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
-        }
+        // ── Section box resolution ───────────────────────────────────────────────
 
-        private static Box? TryGetSectionBoxBounds()
+        /// <summary>
+        /// The active section box as an axis-aligned world box, or null when sectioning is off.
+        /// Primary source is the .NET API's <c>View.GetClippingPlanes()</c> JSON — the documented
+        /// cross-year surface, which also carries the real Box-mode section box (parsed by
+        /// <see cref="SectionBoxJson"/>). The legacy COM <c>CurrentSectionView</c> route is kept
+        /// only as a fallback: it throws a COMException on Navisworks 2026 (issue #24) and never
+        /// saw Box-mode sections at all.
+        /// </summary>
+        private static SectionBox? TryGetSectionBoxBounds(Document doc)
+            => TryGetSectionBoxFromDotNet(doc) ?? TryGetSectionBoxFromCom();
+
+        private static SectionBox? TryGetSectionBoxFromDotNet(Document doc)
         {
             try
             {
-                var sectionView = ComApiBridge.State.CurrentSectionView as InwOpAnonView;
-                var clipPlanes = sectionView?.ClippingPlanes();
-                if (clipPlanes == null) return null;
-
-                double xMin = double.MinValue, yMin = double.MinValue, zMin = double.MinValue;
-                double xMax = double.MaxValue, yMax = double.MaxValue, zMax = double.MaxValue;
-                int found = 0;
-                const double tol = 0.001;
-
-                foreach (InwOaClipPlane plane in clipPlanes)
-                {
-                    if (!plane.Enabled) continue;
-                    var p = plane.Plane;
-                    var n = p.GetNormal();
-                    double dist = p.distance();
-                    double nx = n.data1, ny = n.data2, nz = n.data3;
-
-                    if (Math.Abs(nx - 1) < tol && Math.Abs(ny) < tol && Math.Abs(nz) < tol) { xMin = Math.Max(xMin, -dist); found++; }
-                    else if (Math.Abs(nx + 1) < tol && Math.Abs(ny) < tol && Math.Abs(nz) < tol) { xMax = Math.Min(xMax, dist); found++; }
-                    else if (Math.Abs(ny - 1) < tol && Math.Abs(nx) < tol && Math.Abs(nz) < tol) { yMin = Math.Max(yMin, -dist); found++; }
-                    else if (Math.Abs(ny + 1) < tol && Math.Abs(nx) < tol && Math.Abs(nz) < tol) { yMax = Math.Min(yMax, dist); found++; }
-                    else if (Math.Abs(nz - 1) < tol && Math.Abs(nx) < tol && Math.Abs(ny) < tol) { zMin = Math.Max(zMin, -dist); found++; }
-                    else if (Math.Abs(nz + 1) < tol && Math.Abs(nx) < tol && Math.Abs(ny) < tol) { zMax = Math.Min(zMax, dist); found++; }
-                }
-
-                if (found < 2) return null;
-
-                if (xMin == double.MinValue) xMin = -1e10;
-                if (yMin == double.MinValue) yMin = -1e10;
-                if (zMin == double.MinValue) zMin = -1e10;
-                if (xMax == double.MaxValue) xMax = 1e10;
-                if (yMax == double.MaxValue) yMax = 1e10;
-                if (zMax == double.MaxValue) zMax = 1e10;
-
-                return new Box { MinX = xMin, MinY = yMin, MinZ = zMin, MaxX = xMax, MaxY = yMax, MaxZ = zMax };
+                var json = doc.ActiveView?.GetClippingPlanes();
+                return string.IsNullOrWhiteSpace(json) ? null : SectionBoxJson.Parse(json!);
             }
             catch
             {
@@ -240,7 +215,34 @@ namespace BIMCamel.Collect
             }
         }
 
-        private static bool OverlapsBox(ModelItem item, Box b)
+        private static SectionBox? TryGetSectionBoxFromCom()
+        {
+            try
+            {
+                // Throws COMException on Navisworks 2026 — only reached when the .NET JSON route
+                // above yielded nothing, and the whole method is exception-safe.
+                var sectionView = ComApiBridge.State.CurrentSectionView as InwOpAnonView;
+                var clipPlanes = sectionView?.ClippingPlanes();
+                if (clipPlanes == null) return null;
+
+                var acc = new SectionBoxJson.AxisBoundsAccumulator();
+                foreach (InwOaClipPlane plane in clipPlanes)
+                {
+                    if (!plane.Enabled) continue;
+                    var p = plane.Plane;
+                    var n = p.GetNormal();
+                    acc.AddPlane(n.data1, n.data2, n.data3, p.distance());
+                }
+                return acc.ToBox();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+
+        private static bool OverlapsBox(ModelItem item, SectionBox b)
         {
             try
             {
