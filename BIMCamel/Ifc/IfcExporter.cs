@@ -193,11 +193,18 @@ namespace BIMCamel.Ifc
         private static void WriteInstancedElement(Doc d, IfcSchema schema, IMeshWriter mw, InstancedElement el, CoordTransform identity, double minX, double minY, double minZ, bool computeQuantities, int index)
         {
             var w = d.W;
+            // Defence in depth: an instance whose mesh has no triangles would emit an empty
+            // IfcCartesianPointList3D / CoordIndex. Both are LIST [1:?], so an empty aggregate
+            // makes the whole file schema-invalid and strict readers reject it. The extractor
+            // already filters these out; never write one even if a caller slips one through.
+            if (el.Instances.All(i => i.Mesh == null || i.Mesh.Indices.Count == 0)) return;
+
             var (storeyId, storeyPlace) = d.Storeys.Get(el.Level);
             var mapped = new List<int>(el.Instances.Count);
             double vol = 0, area = 0; MeshQty firstQ = default; bool gotQ = false;
             foreach (var inst in el.Instances)
             {
+                if (inst.Mesh == null || inst.Mesh.Indices.Count == 0) continue;
                 if (!d.Geom.TryGetValue(inst.Key, out var gd)) // first sighting IN THIS FILE → define it
                 {
                     var lm = inst.Mesh;

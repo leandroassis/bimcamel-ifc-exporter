@@ -391,6 +391,8 @@ namespace BIMCamel.UI
             {
                 var doc = NavApp.ActiveDocument;
                 if (doc == null || doc.Models.Count == 0) { SetStatus("Open a model first."); return; }
+                // Reset BEFORE scope collection — the collector counts recovered branch geometry.
+                BIMCamel.Geometry.ExportIssues.Reset();
 
                 var schema = CmbSchema.SelectedIndex == 1 ? IfcSchema.Ifc2x3 : IfcSchema.Ifc4;
                 string schemaName = schema == IfcSchema.Ifc4 ? "IFC4" : "IFC2x3";
@@ -696,6 +698,10 @@ namespace BIMCamel.UI
             sb.AppendLine($"Georef      : {(s.GeorefWritten ? "IfcMapConversion written" : (schema == "IFC2x3" ? "baked into placement (IFC2x3)" : "off"))}");
             sb.AppendLine($"Elements    : {s.ElementCount:N0}");
             sb.AppendLine($"Triangles   : {s.TriangleCount:N0}");
+            // Anything that did not reach the IFC is stated explicitly — elements used to vanish
+            // with no trace anywhere in the UI or the report.
+            var issues = BIMCamel.Geometry.ExportIssues.Report();
+            if (issues.Length > 0) { sb.AppendLine("Not exported:"); sb.Append(issues); }
             sb.AppendLine(s.Instanced
                 ? $"Instancing  : ON · {s.UniqueGeometries:N0} unique / {s.InstanceCount:N0} instances" + (s.UniqueGeometries > 0 ? $"  (×{(double)s.InstanceCount / s.UniqueGeometries:0.0})" : "")
                 : "Instancing  : off");

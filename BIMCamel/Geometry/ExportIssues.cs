@@ -1,0 +1,73 @@
+using System;
+using System.Collections.Generic;
+using System.Text;
+
+namespace BIMCamel.Geometry
+{
+    /// <summary>
+    /// Per-export tally of everything that did NOT reach the IFC.
+    ///
+    /// Elements used to disappear silently: a mesh welded down to nothing, or an item whose
+    /// geometry read threw, simply never appeared in the file and was not counted anywhere, so
+    /// "some elements are missing" was invisible from inside the plug-in. Every drop is now
+    /// recorded here and printed in the export report.
+    ///
+    /// Single-threaded export, so plain static fields are fine (same pattern as
+    /// <see cref="ExportTiming"/>). <see cref="Reset"/> runs at the START of an export — before
+    /// scope collection, which is where <see cref="BranchGeometryRecovered"/> is counted.
+    /// </summary>
+    public static class ExportIssues
+    {
+        /// <summary>Items that yielded no triangles at all. Normal for many nodes (groups,
+        /// annotations); reported for completeness rather than as a fault.</summary>
+        public static int NoTriangles;
+
+        /// <summary>Meshes whose every triangle became degenerate during vertex welding — i.e.
+        /// parts smaller than roughly half the weld tolerance. These are true losses.</summary>
+        public static int CollapsedByWeld;
+
+        /// <summary>Items skipped because reading their geometry or properties threw.</summary>
+        public static int Failed;
+
+        /// <summary>Geometry-bearing nodes that also had children. Before v0.8.0 the collector
+        /// only took childless nodes, so these were dropped (a SolidWorks/Inventor part whose
+        /// children are reference planes vanished entirely).</summary>
+        public static int BranchGeometryRecovered;
+
+        /// <summary>First few failure messages, so the report is actionable.</summary>
+        public static readonly List<string> FailureSamples = new List<string>();
+
+        public static void Reset()
+        {
+            NoTriangles = CollapsedByWeld = Failed = BranchGeometryRecovered = 0;
+            FailureSamples.Clear();
+        }
+
+        /// <summary>Records a per-item failure; the export continues with the next item.</summary>
+        public static void Fail(string? itemName, Exception ex)
+        {
+            Failed++;
+            if (FailureSamples.Count < 5)
+                FailureSamples.Add((string.IsNullOrWhiteSpace(itemName) ? "(unnamed)" : itemName) + " — " + ex.Message);
+        }
+
+        /// <summary>Report text. Empty string when nothing of note happened.</summary>
+        public static string Report()
+        {
+            var sb = new StringBuilder();
+            if (CollapsedByWeld > 0)
+                sb.AppendLine($"  {CollapsedByWeld:N0} element(s) welded away — smaller than the weld tolerance; use a finer Geometry quality to keep them");
+            if (Failed > 0)
+            {
+                sb.AppendLine($"  {Failed:N0} element(s) failed to read and were skipped:");
+                foreach (var f in FailureSamples) sb.AppendLine("      " + f);
+                if (Failed > FailureSamples.Count) sb.AppendLine($"      … and {Failed - FailureSamples.Count:N0} more");
+            }
+            if (NoTriangles > 0)
+                sb.AppendLine($"  {NoTriangles:N0} item(s) carried no triangles (groups / annotations — normal)");
+            if (BranchGeometryRecovered > 0)
+                sb.AppendLine($"  {BranchGeometryRecovered:N0} geometry node(s) that also have children were exported (dropped before v0.8.0)");
+            return sb.ToString();
+        }
+    }
+}

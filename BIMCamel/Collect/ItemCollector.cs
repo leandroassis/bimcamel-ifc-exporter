@@ -176,17 +176,44 @@ namespace BIMCamel.Collect
         private static void CollectLeaves(IEnumerable<ModelItem> items, List<ModelItem> result, bool includeHidden, Action<int>? onProgress, ref int visited)
         {
             foreach (var item in items)
+                CollectFrom(item, result, includeHidden, onProgress, ref visited);
+        }
+
+        /// <summary>
+        /// Collects the geometry-bearing nodes of one subtree; returns true when the subtree
+        /// contributed anything.
+        ///
+        /// Geometry is NOT always attached to a childless node. SolidWorks / Inventor parts
+        /// routinely carry their mesh on the part node while hanging reference planes, coordinate
+        /// systems, annotations or solid bodies underneath it. The previous rule — recurse whenever
+        /// the node has children, and only take it when childless — therefore walked into those
+        /// children, found no geometry, and lost the entire part.
+        ///
+        /// We now fall back to a node's own geometry whenever nothing beneath it produced any.
+        /// That strictly adds elements relative to the old behaviour and can never double-export,
+        /// because a node is only taken when its descendants contributed nothing — so a multibody
+        /// part still exports as its separate child bodies, exactly as before.
+        /// </summary>
+        private static bool CollectFrom(ModelItem item, List<ModelItem> result, bool includeHidden, Action<int>? onProgress, ref int visited)
+        {
+            visited++;
+            if ((visited & 0x3FF) == 0) onProgress?.Invoke(visited);
+
+            if (!includeHidden && item.IsHidden) return false;
+
+            bool any = false, hadChildren = false;
+            foreach (var child in item.Children)
             {
-                visited++;
-                if ((visited & 0x3FF) == 0) onProgress?.Invoke(visited);
-
-                if (!includeHidden && item.IsHidden) continue;
-
-                if (item.Children.Any())
-                    CollectLeaves(item.Children, result, includeHidden, onProgress, ref visited);
-                else if (item.HasGeometry)
-                    result.Add(item);
+                hadChildren = true;
+                if (CollectFrom(child, result, includeHidden, onProgress, ref visited)) any = true;
             }
+
+            if (any) return true;              // descendants covered this subtree's geometry
+            if (!item.HasGeometry) return false;
+
+            result.Add(item);
+            if (hadChildren) Geometry.ExportIssues.BranchGeometryRecovered++;
+            return true;
         }
 
         // ── Section box resolution ───────────────────────────────────────────────
