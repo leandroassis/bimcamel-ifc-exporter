@@ -117,25 +117,25 @@ namespace BIMCamel.Geometry
                     foreach (InwOaFragment3 frag in path.Fragments())
                     {
                         long tr = ExportTiming.Now;
-                        var sink = new PrimitiveSink(); // CurrentTransform null → LOCAL coordinates
+                        // Scale folded into the read: local geometry arrives already in metres,
+                        // so there is no second pass and no second vertex list.
+                        var sink = new PrimitiveSink { Scale = unitScale }; // CurrentTransform null → LOCAL coords
                         // eNONE: PrimitiveSink reads only v.coord, so asking for normals made
                         // Navisworks generate and marshal a per-vertex field we then discarded.
                         frag.GenerateSimplePrimitives(nwEVertexProperty.eNONE, sink);
                         ExportTiming.ReadTicks += ExportTiming.Now - tr; ExportTiming.Fragments++;
                         if (sink.TriangleCount == 0) continue;
 
-                        // local geometry in metres
-                        var lm = new LocalMesh { Indices = sink.Indices, Material = itemMat };
-                        lm.Vertices.Capacity = sink.Vertices.Count;
-                        for (int i = 0; i < sink.Vertices.Count; i++)
-                            lm.Vertices.Add(sink.Vertices[i] * unitScale);
-                        if (o.WeldTol > 0) { long tw = ExportTiming.Now; MeshWelder.Weld(lm.Vertices, lm.Indices, o.WeldTol); ExportTiming.WeldTicks += ExportTiming.Now - tw; }
+                        var lv = sink.Vertices;
+                        var li = sink.Indices;
+                        if (o.WeldTol > 0) { long tw = ExportTiming.Now; MeshWelder.Weld(ref lv, ref li, o.WeldTol); ExportTiming.WeldTicks += ExportTiming.Now - tw; }
+                        var lm = new LocalMesh { Vertices = lv, Indices = li, Material = itemMat };
 
                         // Welding can leave every triangle degenerate (a part smaller than the
                         // tolerance). Emitting that instance wrote an EMPTY IfcCartesianPointList3D
                         // / CoordIndex — both are LIST [1:?], so the whole file became schema
                         // invalid and strict readers (Revit) refuse it.
-                        if (lm.Indices.Count == 0) { collapsedFrags++; continue; }
+                        if (li.Count == 0) { collapsedFrags++; continue; }
 
                         // local→world matrix (model units, column-major 4x4)
                         var m = MeshExtractor.ReadMatrix(frag);
@@ -152,7 +152,9 @@ namespace BIMCamel.Geometry
                         }
 
                         inst.Mesh = lm;
-                        inst.Key = Key(lm);   // the exporter dedups by this key, per output file (option C)
+                        var (full, geomOnly) = Keys(lm);
+                        inst.Key = full;      // the exporter dedups by this key, per output file (option C)
+                        GeometryHandleProbe.Record(frag, geomOnly);
                         el.Instances.Add(inst);
                     }
                 }
@@ -187,7 +189,13 @@ namespace BIMCamel.Geometry
                 return el;
         }
 
-        private static DedupKey Key(LocalMesh lm)
+        /// <summary>
+        /// Content keys for one local mesh, in a single hashing pass: <c>full</c> folds the colour
+        /// in (identical geometry in two colours must stay two unique meshes), <c>geomOnly</c> does
+        /// not — the probe needs pure geometry identity, since one shared mesh legitimately appears
+        /// in several colours and that must not read as a handle conflict.
+        /// </summary>
+        private static (DedupKey full, DedupKey geomOnly) Keys(LocalMesh lm)
         {
             const ulong P0 = 1099511628211UL, P1 = 1099511628219UL; // two distinct odd multipliers
             ulong h0 = 14695981039346656037UL;
@@ -207,6 +215,8 @@ namespace BIMCamel.Geometry
                 h0 = (h0 ^ q) * P0;
                 h1 = (h1 ^ q) * P1;
             }
+            var geomOnly = new DedupKey(h0, h1, verts.Count / 3, idx.Count / 3);
+
             // Fold quantised colour in so identical geometry in different colours becomes distinct
             // unique meshes (each styled once on its IfcRepresentationMap) — v4 D.
             if (lm.Material is Data.Material m)
@@ -216,7 +226,7 @@ namespace BIMCamel.Geometry
                     ((long)Math.Round(m.B * 255) << 8) | (long)Math.Round(m.Transparency * 255));
                 h0 = (h0 ^ c) * P0; h1 = (h1 ^ c) * P1;
             }
-            return new DedupKey(h0, h1, verts.Count / 3, idx.Count / 3);
+            return (new DedupKey(h0, h1, verts.Count / 3, idx.Count / 3), geomOnly);
         }
     }
 }

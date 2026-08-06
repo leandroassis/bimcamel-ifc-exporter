@@ -88,18 +88,20 @@ namespace BIMCamel.Geometry
 
             if (sink.TriangleCount == 0) { ExportIssues.NoTriangles++; return null; }
 
-            if (o.WeldTol > 0) { ts = ExportTiming.Now; MeshWelder.Weld(sink.Vertices, sink.Indices, o.WeldTol); ExportTiming.WeldTicks += ExportTiming.Now - ts; }
+            var verts = sink.Vertices;
+            var idx = sink.Indices;
+            if (o.WeldTol > 0) { ts = ExportTiming.Now; MeshWelder.Weld(ref verts, ref idx, o.WeldTol); ExportTiming.WeldTicks += ExportTiming.Now - ts; }
 
             // Welding can leave every triangle degenerate (a part smaller than the tolerance).
             // That used to sail through here and get dropped, uncounted, by the exporter.
-            if (sink.Indices.Count == 0) { ExportIssues.CollapsedByWeld++; return null; }
+            if (idx.Count == 0) { ExportIssues.CollapsedByWeld++; return null; }
 
             var em = new ElementMesh
             {
                 Name = item.DisplayName ?? "",
                 InstanceGuid = item.InstanceGuid,
-                Vertices = sink.Vertices,
-                Indices = sink.Indices,
+                Vertices = verts,
+                Indices = idx,
                 Material = o.Materials ? PropertyHarvester.GetMaterial(item) : null,
                 ClassKey = hasClass && o.ClassMap!.TryGetValue(ItemCollector.ItemKey(item), out var ck) ? ck : null
             };

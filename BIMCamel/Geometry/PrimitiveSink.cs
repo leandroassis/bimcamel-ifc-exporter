@@ -32,6 +32,14 @@ namespace BIMCamel.Geometry
         /// </summary>
         public double[]? CurrentTransform { get; set; }
 
+        /// <summary>
+        /// Uniform factor applied to every ordinate as it is read (model units → metres for the
+        /// instanced path). Folding it in here removes a separate per-vertex scaling pass and the
+        /// second vertex list it had to fill — on a 6.5 M-triangle model that was ~20 M multiply +
+        /// List.Add operations per export. 1.0 (the default) leaves coordinates untouched.
+        /// </summary>
+        public double Scale { get; set; } = 1.0;
+
         // Running world-space bounding box (for the spike's sanity report).
         public double MinX = double.MaxValue, MinY = double.MaxValue, MinZ = double.MaxValue;
         public double MaxX = double.MinValue, MaxY = double.MinValue, MaxZ = double.MinValue;
@@ -89,6 +97,9 @@ namespace BIMCamel.Geometry
                 wy = m[1] * lx + m[5] * ly + m[9] * lz + m[13];
                 wz = m[2] * lx + m[6] * ly + m[10] * lz + m[14];
             }
+
+            double s = Scale;
+            if (s != 1.0) { wx *= s; wy *= s; wz *= s; }
 
             Vertices.Add(wx); Vertices.Add(wy); Vertices.Add(wz);
 
