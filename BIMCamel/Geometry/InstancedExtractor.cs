@@ -83,6 +83,22 @@ namespace BIMCamel.Geometry
 
             foreach (var item in items)
             {
+                InstancedElement? el;
+                // One unreadable item must not abort the whole export: before this, a COM failure
+                // or OutOfMemory on a single heavy mesh threw out of the iterator, leaving a
+                // truncated IFC on disk (the writer's footer/flush never ran).
+                try { el = BuildElement(item, unitScale, o, hasClass, hasRoles); }
+                catch (Exception ex) { ExportIssues.Fail(MeshExtractor.SafeName(item), ex); el = null; }
+
+                done++;
+                onProgress?.Invoke(done);
+                if (el != null) yield return el;
+            }
+        }
+
+        /// <summary>Reads one item's instanced meshes + semantics; null when it contributes nothing.</summary>
+        private static InstancedElement? BuildElement(ModelItem item, double unitScale, ExtractOptions o, bool hasClass, bool hasRoles)
+        {
                 var el = new InstancedElement
                 {
                     Name = item.DisplayName ?? "",
@@ -101,7 +117,9 @@ namespace BIMCamel.Geometry
                     {
                         long tr = ExportTiming.Now;
                         var sink = new PrimitiveSink(); // CurrentTransform null → LOCAL coordinates
-                        frag.GenerateSimplePrimitives(nwEVertexProperty.eNORMAL, sink);
+                        // eNONE: PrimitiveSink reads only v.coord, so asking for normals made
+                        // Navisworks generate and marshal a per-vertex field we then discarded.
+                        frag.GenerateSimplePrimitives(nwEVertexProperty.eNONE, sink);
                         ExportTiming.ReadTicks += ExportTiming.Now - tr; ExportTiming.Fragments++;
                         if (sink.TriangleCount == 0) continue;
 
@@ -111,6 +129,12 @@ namespace BIMCamel.Geometry
                         for (int i = 0; i < sink.Vertices.Count; i++)
                             lm.Vertices.Add(sink.Vertices[i] * unitScale);
                         if (o.WeldTol > 0) { long tw = ExportTiming.Now; MeshWelder.Weld(lm.Vertices, lm.Indices, o.WeldTol); ExportTiming.WeldTicks += ExportTiming.Now - tw; }
+
+                        // Welding can leave every triangle degenerate (a part smaller than the
+                        // tolerance). Emitting that instance wrote an EMPTY IfcCartesianPointList3D
+                        // / CoordIndex — both are LIST [1:?], so the whole file became schema
+                        // invalid and strict readers (Revit) refuse it.
+                        if (lm.Indices.Count == 0) { ExportIssues.CollapsedByWeld++; continue; }
 
                         // local→world matrix (model units, column-major 4x4)
                         var m = MeshExtractor.ReadMatrix(frag);
@@ -132,9 +156,7 @@ namespace BIMCamel.Geometry
                     }
                 }
 
-                done++;
-                onProgress?.Invoke(done);
-                if (el.Instances.Count == 0) continue; // no triangles → don't harvest or emit it
+                if (el.Instances.Count == 0) { ExportIssues.NoTriangles++; return null; } // don't harvest or emit it
 
                 // Harvest only now that we know the item is actually exported — skips property reads
                 // for the (often ~half) of HasGeometry leaves that produce no triangles (v4).
@@ -151,8 +173,7 @@ namespace BIMCamel.Geometry
                 }
                 ExportTiming.HarvestTicks += ExportTiming.Now - th;
 
-                yield return el;
-            }
+                return el;
         }
 
         private static DedupKey Key(LocalMesh lm)
