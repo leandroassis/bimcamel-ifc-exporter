@@ -11,7 +11,13 @@ namespace BIMCamel.Geometry
     /// </summary>
     public static class MeshWelder
     {
-        public static void Weld(List<double> verts, List<int> indices, double tol)
+        /// <summary>
+        /// Welds in place, handing back the new lists by reference. The lists are SWAPPED rather
+        /// than copied back into the originals: the old Clear()+AddRange() cost a second full pass
+        /// over every coordinate of every mesh, which on a 6.5 M-triangle model is ~20 M doubles
+        /// copied for nothing.
+        /// </summary>
+        public static void Weld(ref List<double> verts, ref List<int> indices, double tol)
         {
             if (tol <= 0 || verts.Count == 0) return;
 
@@ -44,8 +50,8 @@ namespace BIMCamel.Geometry
                 newIdx.Add(a); newIdx.Add(b); newIdx.Add(c);
             }
 
-            verts.Clear(); verts.AddRange(newVerts);
-            indices.Clear(); indices.AddRange(newIdx);
+            verts = newVerts;
+            indices = newIdx;
         }
     }
 }
