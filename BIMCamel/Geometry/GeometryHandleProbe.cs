@@ -30,6 +30,11 @@ namespace BIMCamel.Geometry
     {
         private static readonly Dictionary<long, DedupKey> Seen = new Dictionary<long, DedupKey>();
         private static bool _enabled;
+        private static bool _attempted;     // Record() was called at least once — distinguishes
+                                             // "never ran" (non-instanced export) from "ran and
+                                             // crashed on the very first fragment", which otherwise
+                                             // look identical (both leave every counter at zero).
+        private static string? _lastError;
         private static long _ticks;
 
         private static int _fragments;      // fragments whose handle we could read
@@ -41,6 +46,8 @@ namespace BIMCamel.Geometry
         {
             Seen.Clear();
             _enabled = true;
+            _attempted = false;
+            _lastError = null;
             _ticks = 0;
             _fragments = _distinct = _conflicts = _unreadable = 0;
         }
@@ -49,6 +56,7 @@ namespace BIMCamel.Geometry
         public static void Record(InwOaFragment3 frag, DedupKey geometryOnlyKey)
         {
             if (!_enabled) return;
+            _attempted = true;
             long t0 = ExportTiming.Now;
             try
             {
@@ -67,9 +75,10 @@ namespace BIMCamel.Geometry
                     _distinct++;
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 _enabled = false;   // diagnostics must never disturb an export
+                _lastError = ex.GetType().Name + ": " + ex.Message;
             }
             finally
             {
@@ -89,11 +98,11 @@ namespace BIMCamel.Geometry
         /// <summary>Report line, or empty when the probe never ran (non-instanced export).</summary>
         public static string Report()
         {
-            if (_fragments == 0 && _unreadable == 0) return "";
+            if (!_attempted) return ""; // Record() was never called — e.g. non-instanced export.
 
             var ms = ExportTiming.Ms(_ticks).ToString("N0", CultureInfo.InvariantCulture);
             if (!_enabled)
-                return $"Geometry handles: probe unavailable on this model (cost {ms} ms)\n";
+                return $"Geometry handles: probe crashed and disabled itself — {_lastError} (export unaffected; cost {ms} ms)\n";
             if (_fragments == 0)
                 return $"Geometry handles: not exposed by any of {_unreadable:N0} fragment(s) — handle reuse not possible here\n";
 
