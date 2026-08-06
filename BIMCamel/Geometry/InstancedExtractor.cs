@@ -111,6 +111,7 @@ namespace BIMCamel.Geometry
                 InwOpSelection comSel = ComApiBridge.ToInwOpSelection(coll);
                 ExportTiming.ComConvertTicks += ExportTiming.Now - tc; ExportTiming.ComConverts++;
 
+                int collapsedFrags = 0;   // fragments welded down to nothing (see the tally below)
                 foreach (InwOaPath3 path in comSel.Paths())
                 {
                     foreach (InwOaFragment3 frag in path.Fragments())
@@ -134,7 +135,7 @@ namespace BIMCamel.Geometry
                         // tolerance). Emitting that instance wrote an EMPTY IfcCartesianPointList3D
                         // / CoordIndex — both are LIST [1:?], so the whole file became schema
                         // invalid and strict readers (Revit) refuse it.
-                        if (lm.Indices.Count == 0) { ExportIssues.CollapsedByWeld++; continue; }
+                        if (lm.Indices.Count == 0) { collapsedFrags++; continue; }
 
                         // local→world matrix (model units, column-major 4x4)
                         var m = MeshExtractor.ReadMatrix(frag);
@@ -156,7 +157,17 @@ namespace BIMCamel.Geometry
                     }
                 }
 
-                if (el.Instances.Count == 0) { ExportIssues.NoTriangles++; return null; } // don't harvest or emit it
+                if (el.Instances.Count == 0)
+                {
+                    // Nothing survived. Distinguish "this node never had triangles" (a group or
+                    // annotation — normal) from "the weld ate all of it" (a real, actionable loss).
+                    if (collapsedFrags > 0) ExportIssues.CollapsedByWeld++; else ExportIssues.NoTriangles++;
+                    return null; // don't harvest or emit it
+                }
+
+                // Some parts of this element were welded away but others survived, so no element
+                // was lost — counted separately so the report cannot imply phantom data loss.
+                ExportIssues.CollapsedFragments += collapsedFrags;
 
                 // Harvest only now that we know the item is actually exported — skips property reads
                 // for the (often ~half) of HasGeometry leaves that produce no triangles (v4).

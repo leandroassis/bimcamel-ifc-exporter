@@ -22,9 +22,15 @@ namespace BIMCamel.Geometry
         /// annotations); reported for completeness rather than as a fault.</summary>
         public static int NoTriangles;
 
-        /// <summary>Meshes whose every triangle became degenerate during vertex welding — i.e.
-        /// parts smaller than roughly half the weld tolerance. These are true losses.</summary>
+        /// <summary>ELEMENTS lost entirely to vertex welding — every triangle they had became
+        /// degenerate, i.e. the whole part is smaller than roughly half the weld tolerance.</summary>
         public static int CollapsedByWeld;
+
+        /// <summary>Individual welded-away pieces of elements that DID export (instanced path:
+        /// one item can hold many fragments). Nothing is missing from the model when this is
+        /// non-zero — counted apart from <see cref="CollapsedByWeld"/> so the report can never
+        /// imply data loss that did not happen.</summary>
+        public static int CollapsedFragments;
 
         /// <summary>Items skipped because reading their geometry or properties threw.</summary>
         public static int Failed;
@@ -39,7 +45,7 @@ namespace BIMCamel.Geometry
 
         public static void Reset()
         {
-            NoTriangles = CollapsedByWeld = Failed = BranchGeometryRecovered = 0;
+            NoTriangles = CollapsedByWeld = CollapsedFragments = Failed = BranchGeometryRecovered = 0;
             FailureSamples.Clear();
         }
 
@@ -56,7 +62,9 @@ namespace BIMCamel.Geometry
         {
             var sb = new StringBuilder();
             if (CollapsedByWeld > 0)
-                sb.AppendLine($"  {CollapsedByWeld:N0} element(s) welded away — smaller than the weld tolerance; use a finer Geometry quality to keep them");
+                sb.AppendLine($"  {CollapsedByWeld:N0} element(s) LOST to vertex welding — smaller than the weld tolerance; use a finer Geometry quality to keep them");
+            if (CollapsedFragments > 0)
+                sb.AppendLine($"  {CollapsedFragments:N0} sub-part(s) welded away inside elements that DID export (no element lost)");
             if (Failed > 0)
             {
                 sb.AppendLine($"  {Failed:N0} element(s) failed to read and were skipped:");
