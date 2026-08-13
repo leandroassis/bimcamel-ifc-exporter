@@ -95,7 +95,7 @@ namespace BIMCamel.UI
             AddItems(CmbBasePoint, new[] { "Geometry origin — recommended (real coords kept in georeferencing)", "Model origin (no offset — keeps world coords)", "Custom base point" }); CmbBasePoint.SelectedIndex = 0;
 
             ChkGeoref.IsChecked = true; ChkInstancing.IsChecked = true; ChkValidate.IsChecked = false; ChkProfile.IsChecked = true;
-            ChkProps.IsChecked = true; ChkMaterials.IsChecked = true; ChkQuantities.IsChecked = true; ChkSplit.IsChecked = false;
+            ChkProps.IsChecked = true; ChkInheritProps.IsChecked = true; ChkMaterials.IsChecked = true; ChkQuantities.IsChecked = true; ChkSplit.IsChecked = false;
             TxtE.Text = TxtN.Text = TxtElev.Text = TxtRot.Text = "0";
 
             CmbBasePoint.SelectionChanged += (_, _) => { CoordRow.Visibility = CmbBasePoint.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed; PreviewBasePoint(); };
@@ -394,6 +394,7 @@ namespace BIMCamel.UI
                 // Reset BEFORE scope collection — the collector counts recovered branch geometry.
                 BIMCamel.Geometry.ExportIssues.Reset();
                 BIMCamel.Geometry.GeometryHandleProbe.Reset();
+                BIMCamel.Data.PropertyHarvester.ResetCache();
 
                 var schema = CmbSchema.SelectedIndex == 1 ? IfcSchema.Ifc2x3 : IfcSchema.Ifc4;
                 string schemaName = schema == IfcSchema.Ifc4 ? "IFC4" : "IFC2x3";
@@ -502,6 +503,7 @@ namespace BIMCamel.UI
         private ExtractOptions BuildExtractOptions(Dictionary<string, string> classMap) => new ExtractOptions
         {
             Props = ChkProps.IsChecked == true, Materials = ChkMaterials.IsChecked == true,
+            InheritParentProps = ChkInheritProps.IsChecked == true,
             PsetFilter = SelectedCategories(), ClassMap = classMap,
             ParamMap = BuildParamRules(), Roles = BuildRoles()
         };
@@ -774,7 +776,8 @@ namespace BIMCamel.UI
             Schema = CmbSchema.SelectedIndex, Units = CmbUnits.SelectedIndex, Scope = ScopeIndex(),
             Quality = CmbQuality.SelectedIndex, BasePoint = CmbBasePoint.SelectedIndex,
             CustomE = ParseD(TxtE.Text), CustomN = ParseD(TxtN.Text), CustomElev = ParseD(TxtElev.Text), Rotation = ParseD(TxtRot.Text),
-            Georef = ChkGeoref.IsChecked == true, Props = ChkProps.IsChecked == true, Materials = ChkMaterials.IsChecked == true, Instancing = ChkInstancing.IsChecked == true,
+            Georef = ChkGeoref.IsChecked == true, Props = ChkProps.IsChecked == true, NoInheritParentProps = ChkInheritProps.IsChecked != true,
+            Materials = ChkMaterials.IsChecked == true, Instancing = ChkInstancing.IsChecked == true,
             Validate = ChkValidate.IsChecked == true, Mapping = GridToText()
         };
         private void Apply(ExportProfile p)
@@ -785,7 +788,7 @@ namespace BIMCamel.UI
             CmbQuality.SelectedIndex = Clamp(p.Quality, CmbQuality.Items.Count);
             CmbBasePoint.SelectedIndex = Clamp(p.BasePoint, CmbBasePoint.Items.Count);
             TxtE.Text = Inv(p.CustomE); TxtN.Text = Inv(p.CustomN); TxtElev.Text = Inv(p.CustomElev); TxtRot.Text = Inv(p.Rotation);
-            ChkGeoref.IsChecked = p.Georef; ChkProps.IsChecked = p.Props; ChkMaterials.IsChecked = p.Materials;
+            ChkGeoref.IsChecked = p.Georef; ChkProps.IsChecked = p.Props; ChkInheritProps.IsChecked = !p.NoInheritParentProps; ChkMaterials.IsChecked = p.Materials;
             ChkInstancing.IsChecked = p.Instancing; ChkValidate.IsChecked = p.Validate;
             TextToGrid(p.Mapping);
         }

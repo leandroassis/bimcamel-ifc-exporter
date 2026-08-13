@@ -176,12 +176,12 @@ namespace BIMCamel.Geometry
                 long th = ExportTiming.Now;
                 if (o.Props)
                 {
-                    el.Properties = Data.PropertyHarvester.Harvest(item, o.PsetFilter);
+                    el.Properties = Data.PropertyHarvester.Harvest(item, o.PsetFilter, o.InheritParentProps);
                     Data.PsetCatalog.Apply(el.Properties, o.ParamMap);
                 }
                 if (hasRoles)
                 {
-                    var rv = Data.PropertyHarvester.ReadRoles(item, o.Roles!);
+                    var rv = Data.PropertyHarvester.ReadRoles(item, o.Roles!, o.InheritParentProps);
                     el.TypeName = rv.Type; el.Level = rv.Level; el.MaterialName = rv.Material; el.ClassCode = rv.Classification;
                 }
                 ExportTiming.HarvestTicks += ExportTiming.Now - th;

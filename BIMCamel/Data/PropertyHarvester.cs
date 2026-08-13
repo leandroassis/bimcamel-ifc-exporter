@@ -49,13 +49,62 @@ namespace BIMCamel.Data
     /// Harvests Navisworks properties and colour for an element (F4 / F8). Property loop is the
     /// proven pattern from NavisworksExporter.ElementCollector. Values are typed (real/int/bool/
     /// text) so the IFC carries proper IfcValue types. UI-thread only.
+    ///
+    /// Property inheritance from ancestors: many source systems (SmartPlant 3D, PDMS/E3D, AVEVA)
+    /// attach the meaningful property set (e.g. a "SmartPlant3D" category with part number, weight,
+    /// insulation, area system…) on a composite tree node (an "Item"/equipment occurrence), while the
+    /// tessellated geometry Navisworks actually reads lives on child "Aspects"/primitive nodes several
+    /// levels below it. A geometry leaf then carries almost nothing of its own. So besides the leaf's
+    /// own PropertyCategories, we walk up <see cref="ModelItem.Parent"/> and fold in every ancestor's
+    /// categories too — closest node wins on a (pset, property name) collision.
     /// </summary>
     public static class PropertyHarvester
     {
-        /// <summary>Harvest props; if <paramref name="include"/> is non-null, only those Pset (category) names.</summary>
-        public static List<IfcProp> Harvest(ModelItem item, HashSet<string>? include = null)
+        // Ancestor property cache for the hot export path: keyed by the ancestor ModelItem, since
+        // many geometry leaves (e.g. dozens of primitives under one equipment's "Aspects" node)
+        // share the same ancestors — without this, every leaf would re-walk and re-read the same
+        // ancestor's properties from COM again from scratch.
+        private static readonly Dictionary<ModelItem, List<IfcProp>> _ancestorCache = new Dictionary<ModelItem, List<IfcProp>>();
+
+        /// <summary>Clear the ancestor cache. Call once at the start of each export (documents/models can change between runs).</summary>
+        public static void ResetCache() => _ancestorCache.Clear();
+
+        /// <summary>
+        /// Harvest props; if <paramref name="include"/> is non-null, only those Pset (category) names.
+        /// When <paramref name="inheritFromParents"/> (default on), properties from ancestor tree
+        /// nodes are folded in too — the item's own value wins on a (pset, name) collision.
+        /// </summary>
+        public static List<IfcProp> Harvest(ModelItem item, HashSet<string>? include = null, bool inheritFromParents = true)
         {
             var list = new List<IfcProp>();
+            var seen = new HashSet<(string pset, string name)>();
+            AddOwnProps(item, include, list, seen);
+
+            if (inheritFromParents)
+            {
+                // Walk .Parent one hop at a time (rather than materialising AncestorsAndSelf, whose
+                // enumeration order isn't load-bearing here) so nearer ancestors are folded in before
+                // farther ones and "closest wins" falls out of the seen-set naturally. Capped against
+                // a pathological/cyclic tree.
+                var anc = SafeParent(item);
+                int guard = 0;
+                while (anc != null && guard++ < 256)
+                {
+                    foreach (var p in AncestorPropsCached(anc, include))
+                        if (seen.Add((p.Pset, p.Name))) list.Add(p);
+                    anc = SafeParent(anc);
+                }
+            }
+            return list;
+        }
+
+        private static ModelItem? SafeParent(ModelItem item)
+        {
+            try { return item.Parent; } catch { return null; }
+        }
+
+        private static void AddOwnProps(ModelItem item, HashSet<string>? include, List<IfcProp> list, HashSet<(string, string)> seen)
+        {
             try
             {
                 foreach (var cat in item.PropertyCategories)
@@ -66,24 +115,61 @@ namespace BIMCamel.Data
                     {
                         string name = p.DisplayName ?? p.Name ?? "";
                         if (string.IsNullOrEmpty(name)) continue;
-                        list.Add(Typed(pset, name, p.Value));
+                        if (seen.Add((pset, name))) list.Add(Typed(pset, name, p.Value));
                     }
                 }
             }
             catch { /* tolerate odd nodes */ }
-            return list;
         }
 
-        /// <summary>Distinct property-category (Pset) names found across a sample of items.</summary>
+        // Cached, UNFILTERED per-ancestor property list (so the same cache entry serves every
+        // include-set a caller might pass); the category filter is applied on read.
+        private static List<IfcProp> AncestorPropsCached(ModelItem ancestor, HashSet<string>? include)
+        {
+            if (!_ancestorCache.TryGetValue(ancestor, out var all))
+            {
+                all = new List<IfcProp>();
+                var seen = new HashSet<(string, string)>();
+                AddOwnProps(ancestor, null, all, seen);
+                _ancestorCache[ancestor] = all;
+            }
+            return include == null ? all : all.Where(p => include.Contains(p.Pset)).ToList();
+        }
+
+        /// <summary>Self + every ancestor's property categories, nearest node first. Used by the Scan/UI helpers below.</summary>
+        private static IEnumerable<PropertyCategory> AllCategories(ModelItem item, Dictionary<ModelItem, List<PropertyCategory>>? cache = null)
+        {
+            IEnumerable<PropertyCategory>? own = null;
+            try { own = item.PropertyCategories; } catch { }
+            if (own != null) foreach (var c in own) yield return c;
+
+            var anc = SafeParent(item);
+            int guard = 0;
+            while (anc != null && guard++ < 256)
+            {
+                List<PropertyCategory>? cats;
+                if (cache == null || !cache.TryGetValue(anc, out cats))
+                {
+                    cats = new List<PropertyCategory>();
+                    try { foreach (var c in anc.PropertyCategories) cats.Add(c); } catch { }
+                    cache?.Add(anc, cats);
+                }
+                foreach (var c in cats) yield return c;
+                anc = SafeParent(anc);
+            }
+        }
+
+        /// <summary>Distinct property-category (Pset) names found across a sample of items (incl. ancestors).</summary>
         public static List<string> ScanCategories(IEnumerable<ModelItem> items, int cap = 4000, Action<int>? onProgress = null)
         {
             var set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var cache = new Dictionary<ModelItem, List<PropertyCategory>>();
             int n = 0;
             foreach (var item in items)
             {
                 try
                 {
-                    foreach (var cat in item.PropertyCategories)
+                    foreach (var cat in AllCategories(item, cache))
                     {
                         var name = cat.DisplayName ?? cat.Name;
                         if (!string.IsNullOrEmpty(name)) set.Add(name!);
@@ -101,6 +187,7 @@ namespace BIMCamel.Data
         public static List<string> ScanValues(IEnumerable<ModelItem> items, int itemCap = 4000, int valueCap = 4000, Action<int>? onProgress = null)
         {
             var set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var cache = new Dictionary<ModelItem, List<PropertyCategory>>();
             int n = 0;
             foreach (var item in items)
             {
@@ -108,7 +195,7 @@ namespace BIMCamel.Data
                 {
                     if (!string.IsNullOrEmpty(item.DisplayName)) set.Add(item.DisplayName);
                     if (!string.IsNullOrEmpty(item.ClassDisplayName)) set.Add(item.ClassDisplayName);
-                    foreach (var cat in item.PropertyCategories)
+                    foreach (var cat in AllCategories(item, cache))
                         foreach (var p in cat.Properties)
                         {
                             var v = Typed("", "", p.Value).Value;
@@ -127,12 +214,13 @@ namespace BIMCamel.Data
         public static List<string> ScanPropertyNames(IEnumerable<ModelItem> items, int cap = 1000)
         {
             var set = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+            var cache = new Dictionary<ModelItem, List<PropertyCategory>>();
             int n = 0;
             foreach (var item in items)
             {
                 try
                 {
-                    foreach (var cat in item.PropertyCategories)
+                    foreach (var cat in AllCategories(item, cache))
                         foreach (var p in cat.Properties)
                         {
                             var name = p.DisplayName ?? p.Name;
@@ -155,12 +243,13 @@ namespace BIMCamel.Data
         public static Dictionary<string, List<string>> ScanCategoryParams(IEnumerable<ModelItem> items, int cap = 1000)
         {
             var map = new Dictionary<string, SortedSet<string>>(StringComparer.OrdinalIgnoreCase);
+            var cache = new Dictionary<ModelItem, List<PropertyCategory>>();
             int n = 0;
             foreach (var item in items)
             {
                 try
                 {
-                    foreach (var cat in item.PropertyCategories)
+                    foreach (var cat in AllCategories(item, cache))
                     {
                         var cn = cat.DisplayName ?? cat.Name;
                         if (string.IsNullOrEmpty(cn)) continue;
@@ -199,14 +288,18 @@ namespace BIMCamel.Data
             };
         }
 
-        /// <summary>One pass over an item's properties reading the configured role values (category-qualified).</summary>
-        public static RoleValues ReadRoles(ModelItem item, PropertyRoles roles)
+        /// <summary>
+        /// One pass over an item's (+ ancestors', when <paramref name="inheritFromParents"/>) properties
+        /// reading the configured role values (category-qualified). Closest node wins per role.
+        /// </summary>
+        public static RoleValues ReadRoles(ModelItem item, PropertyRoles roles, bool inheritFromParents = true)
         {
             var rv = new RoleValues { Type = "", Level = "", Material = "", Classification = "" };
             if (roles == null || !roles.Any) return rv;
             try
             {
-                foreach (var cat in item.PropertyCategories)
+                var cats = inheritFromParents ? AllCategories(item) : SafeOwnCategories(item);
+                foreach (var cat in cats)
                 {
                     var cn = cat.DisplayName ?? cat.Name ?? "";
                     foreach (var p in cat.Properties)
@@ -218,10 +311,23 @@ namespace BIMCamel.Data
                         else if (rv.Material == "" && Match(roles.Material, cn, name!)) rv.Material = Typed("", "", p.Value).Value;
                         else if (rv.Classification == "" && Match(roles.Classification, cn, name!)) rv.Classification = Typed("", "", p.Value).Value;
                     }
+                    // Once every requested role has a value, stop climbing — closest node wins.
+                    bool typeDone = rv.Type != "" || !roles.Type.IsSet;
+                    bool levelDone = rv.Level != "" || !roles.Level.IsSet;
+                    bool materialDone = rv.Material != "" || !roles.Material.IsSet;
+                    bool classDone = rv.Classification != "" || !roles.Classification.IsSet;
+                    if (typeDone && levelDone && materialDone && classDone) break;
                 }
             }
             catch { }
             return rv;
+        }
+
+        private static IEnumerable<PropertyCategory> SafeOwnCategories(ModelItem item)
+        {
+            IEnumerable<PropertyCategory>? own = null;
+            try { own = item.PropertyCategories; } catch { }
+            return own ?? Array.Empty<PropertyCategory>();
         }
 
         private static bool Match(PropRef r, string categoryName, string propName)

@@ -23,6 +23,11 @@ namespace BIMCamel.Profiles
         [DataMember] public double Rotation;
         [DataMember] public bool Georef = true;
         [DataMember] public bool Props = true;
+        // Inverted so that loading a profile saved before this option existed (the field is simply
+        // absent from the JSON) leaves it at the CLR default `false` — i.e. inheritance stays ON,
+        // matching the current default — rather than a field initializer DataContractJsonSerializer
+        // never runs when deserializing a missing optional member.
+        [DataMember] public bool NoInheritParentProps;
         [DataMember] public bool Materials = true;
         [DataMember] public bool Instancing;
         [DataMember] public bool Validate;

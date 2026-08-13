@@ -609,6 +609,7 @@
                     <Border Style="{StaticResource BadgeOpt}"><TextBlock Text="OPTIONAL" FontSize="9.5" FontWeight="SemiBold" Foreground="#6B7480"/></Border>
                   </StackPanel>
                   <CheckBox x:Name="ChkProps" Content="Export properties (property sets)" ToolTip="Write each element's property sets into the IFC."/>
+                  <CheckBox x:Name="ChkInheritProps" Content="Include properties inherited from parent items" ToolTip="Many source systems (SmartPlant 3D, PDMS/E3D, AVEVA…) attach the real metadata (e.g. a 'SmartPlant3D' property set with part number, weight, insulation…) to a parent tree item, while the exported geometry lives on child nodes below it. When this is on, BIMCamel walks up the tree and folds each ancestor's properties into the exported element too (the element's own values win on a name clash). Turn off to export only each geometry node's own properties."/>
                   <CheckBox x:Name="ChkMaterials" Content="Export materials / colours" ToolTip="Write material names and colours."/>
                   <CheckBox x:Name="ChkQuantities" Content="Compute base quantities (volume / area / length)" ToolTip="Compute and write IfcElementQuantity base quantities."/>
                 </StackPanel>

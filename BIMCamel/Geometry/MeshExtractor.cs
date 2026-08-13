@@ -13,6 +13,7 @@ namespace BIMCamel.Geometry
     {
         public bool Props;
         public bool Materials;
+        public bool InheritParentProps = true;        // fold in ancestor tree nodes' properties (SmartPlant3D/PDMS-style trees)
         public double WeldTol;                       // in the vertices' own units (caller sets correctly)
         public HashSet<string>? PsetFilter;
         public Dictionary<string, string>? ClassMap; // itemKey → classKey (encoded class|predef)
@@ -108,12 +109,12 @@ namespace BIMCamel.Geometry
             ts = ExportTiming.Now;
             if (o.Props)
             {
-                em.Properties = PropertyHarvester.Harvest(item, o.PsetFilter);
+                em.Properties = PropertyHarvester.Harvest(item, o.PsetFilter, o.InheritParentProps);
                 PsetCatalog.Apply(em.Properties, o.ParamMap);
             }
             if (hasRoles)
             {
-                var rv = PropertyHarvester.ReadRoles(item, o.Roles!);
+                var rv = PropertyHarvester.ReadRoles(item, o.Roles!, o.InheritParentProps);
                 em.TypeName = rv.Type; em.Level = rv.Level; em.MaterialName = rv.Material; em.ClassCode = rv.Classification;
             }
             ExportTiming.HarvestTicks += ExportTiming.Now - ts;
